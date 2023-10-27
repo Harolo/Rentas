@@ -1,5 +1,6 @@
 package com.bbva.rentas.service;
 
+import com.bbva.rentas.controller.FileProcessingController;
 import com.bbva.rentas.dto.RegistroSolicitudRentaElement;
 import com.bbva.rentas.dto.SolicitudRentaRequestDto;
 import com.bbva.rentas.dto.SolicitudRentaResponse;
@@ -18,7 +19,8 @@ import org.apache.tomcat.util.codec.binary.Base64;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,11 +32,14 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 
+
 @Service
 public class FileProcessingService {
 
     @Autowired
     private AppProperties appProperties;
+
+    private static final Logger logger = LogManager.getLogger(FileProcessingController.class);
 
 
     public List<SolicitudRentaRequestDto> processFile() {
@@ -46,9 +51,8 @@ public class FileProcessingService {
             File carpeta = new File(appProperties.getFilePath());
             File[] archivos = carpeta.listFiles();
 
-            assert archivos != null;
             for (File archivo : archivos) {
-                if (archivo.isFile() && archivo.getName().contains(formatNameFile)) {
+                if (archivo.isFile() && archivo.exists() && archivo.getName().contains(formatNameFile)) {
                     FileReader fileReader = new FileReader(archivo);
                     BufferedReader bufferedReader = new BufferedReader(fileReader);
                     String linea;
@@ -63,15 +67,22 @@ public class FileProcessingService {
                             if (pdfFile != null) {
                                 String base64Pdf = encodeFileToBase64(pdfFile);
                                 solicitudRentaRequestDto.setDocSoporteJudicial(base64Pdf);
+                            }else {
+                                solicitudRentaRequestDto.setDocSoporteJudicial("");
                             }
                         }
+
                         SolicitudRentaResponse solicitudRentaResponse = enviarAServicioExterno(solicitudRentaRequestDto);
                         solicitudRentaRequestDto.setCodigoTransaccion(solicitudRentaResponse.getTipoCodigoTransaccion().getValue());
                         dataOutList.add(solicitudRentaRequestDto);
                     }
+                    logger.info("archivo {} procesado con exito", archivo.getName());
                     bufferedReader.close();
+                }else {
+                    logger.info("archivo {} no procesado",archivo.getName());
                 }
             }
+
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -87,7 +98,7 @@ public class FileProcessingService {
                 if (file.isFile() && file.getName().contains(tipoDocumento) && file.getName().endsWith(".pdf")) {
                     return file;
                 } else {
-                    System.out.println(">>> No se encontro el archivo con el documento" + tipoDocumento);
+                    logger.info("No se encontro el archivo con el documento: {}",tipoDocumento);
                 }
             }
         }
@@ -121,10 +132,11 @@ public class FileProcessingService {
 
                 return objectMapper.readValue(jsonResponse, SolicitudRentaResponse.class);
             } else {
-                System.err.println("Error en la llamada al servicio externo: " + response.getStatusLine().getStatusCode());
-                throw new ConnectionClosedException("Error en la llamada al servicio externo: " + response.getStatusLine().getStatusCode());            }
+                logger.info("Error en la llamada al servicio externo: {}",response.getStatusLine().getStatusCode());
+                throw new ConnectionClosedException("Error en la llamada al servicio externo: " , response.getStatusLine().getStatusCode());
+            }
         } catch (Exception e) {
-            System.err.println("Error al ejecutar la llamada al servicio externo "+ e.getMessage());
+            logger.info("Error al ejecutar la llamada al servicio externo: {}",e.getMessage());
             return null;
         }
     }
@@ -135,8 +147,8 @@ public class FileProcessingService {
     public void descomprimirArchivoZip() {
         File archivoZipOrigen = new File(appProperties.getRutaOrigenZip());
         if (!archivoZipOrigen.exists()) {
-            System.err.println("El archivo ZIP de origen no existe en la ruta especificada.");
-            return; // Salir de la función si el archivo no existe
+            logger.info("El archivo ZIP de origen no existe en la ruta especificada.");
+            return;
         }
 
         try (ZipInputStream zipInputStream = new ZipInputStream(Files.newInputStream(Paths.get(appProperties.getRutaOrigenZip())))) {
@@ -156,11 +168,10 @@ public class FileProcessingService {
                 }
                 zipEntry = zipInputStream.getNextEntry();
             }
-
-            System.out.println("Archivos descomprimidos con éxito.");
+            logger.info("Archivos descomprimidos con exito");
         } catch (IOException e) {
             e.printStackTrace();
-            System.err.println("Error al descomprimir el archivo ZIP: " + e.getMessage());
+            logger.info("Error al descomprimir el archivo ZIP: {}", e.getMessage());
         }
     }
 }
